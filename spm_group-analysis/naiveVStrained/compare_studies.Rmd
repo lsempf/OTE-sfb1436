@@ -1,0 +1,683 @@
+---
+title: "ROI analysis trained vs naive"
+author: "Linda Sempf"
+output:
+  html_document:
+    theme: sandstone
+    highlight: rstudio
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+    toc_depth: 3
+  pdf_document:
+    toc: yes
+---
+
+_input_
+1) extracted betas via script `extract_ROI_contrast_weights_from_con_images.m`
+
+```{r}
+rm(list = ls())
+library(tidyverse); library(afex); library(emmeans); library('plot.matrix'); library(dplyr); library(readr); library(viridis); library(lme4); library(cluster); library(patchwork); library(philentropy); library(ggbeeswarm); library(lmerTest); library(nlme); library(broom); library(stringr); library(purrr); library(tidyr); library(tibble); library(ggh4x);
+```
+
+
+# IPL (early likely > early unlikely)
+```{r}
+# trained
+df_cuetarget <- read.csv("extracted_betas/cuetarget/active_trained_se>su_leftIPL.csv") 
+subjects_cuetarget <- c(seq(from="009",to="24"),seq(from="027",to="047"),seq(from="049",to="051"), seq(from="053",to="054")) 
+subjects_cuetarget_task      <- setdiff(subjects_cuetarget, c(10,18,21,36,49,50,51))
+df_cuetarget$subject <- subjects_cuetarget_task
+
+cond_cols <- setdiff(names(df_cuetarget), "subject")
+
+df_cuetarget <- df_cuetarget %>%
+  pivot_longer(cols = all_of(cond_cols), names_to = "trial_type", values_to = "beta", values_drop_na = FALSE) %>%
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>%  
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>% separate(trial_type,
+                                                                           into = c("time_interval", "likeliness"),
+                                                                           sep = "_",
+                                                                           remove = FALSE) %>%
+  arrange(subject, trial_type)
+
+df_cuetarget$experiment <- "active_trained"
+
+df_cuetarget <- df_cuetarget %>%
+  mutate(subject_unique = paste0(experiment, "_", subject))
+
+
+# naive 
+df_diract <- read.csv("extracted_betas/diract/active_naive_earlylikely>earlyunlikely_IPL_cuetarget.csv") 
+subjects_diract <- c(seq(from="001",to="18")) 
+subjects_diract <- setdiff(subjects_diract, c(3,17)) 
+
+df_diract$subject <- subjects_diract
+
+cond_cols <- setdiff(names(df_diract), "subject")
+
+df_diract <- df_diract %>%
+  pivot_longer(cols = all_of(cond_cols), names_to = "trial_type", values_to = "beta", values_drop_na = FALSE) %>%
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>%  
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>% 
+  separate(trial_type,
+           into = c("time_interval", "likeliness"),
+           sep = "_",
+           remove = FALSE) %>%
+  arrange(subject, trial_type)
+
+df_diract$experiment <- "active_naive"
+
+df_diract <- df_diract %>%
+  mutate(subject_unique = paste0(experiment, "_", subject))
+
+df <- rbind(df_cuetarget,df_diract)
+
+df_leftIPL_early <- df
+df_leftIPL_early$contrast = "early likely > early unlikely"
+df_leftIPL_early$brain = "left IPL"
+
+# ANOVA (early and late)
+fit_earlyIPL <- aov_ez(
+  id = "subject_unique",
+  dv = "beta",
+  within = c("time_interval", "likeliness"),
+  between = "experiment",
+  data = df, 
+  fun_aggregate = mean
+)
+fit_earlyIPL
+
+# only early trials for IPL
+fit_earlyIPL_early <- aov_ez(
+  id = "subject_unique",
+  dv = "beta",
+  within = c("likeliness"),
+  between = "experiment",
+  data = df %>%
+    subset(time_interval == "early"), 
+  fun_aggregate = mean
+)
+fit_earlyIPL_early
+
+# t test
+emm_early_IPL <- emmeans(fit_earlyIPL_early, ~ likeliness | experiment)
+pairs(emm_early_IPL)
+```
+
+# RLPFC (early likely > early unlikely) 
+```{r}
+# trained
+df_cuetarget <- read.csv("extracted_betas/cuetarget/active_trained_se>su_BA10.csv") 
+subjects_cuetarget <- c(seq(from="009",to="24"),seq(from="027",to="047"),seq(from="049",to="051"), seq(from="053",to="054")) 
+subjects_cuetarget_task      <- setdiff(subjects_cuetarget, c(10,18,21,36,49,50,51))
+df_cuetarget$subject <- subjects_cuetarget_task
+
+cond_cols <- setdiff(names(df_cuetarget), "subject")
+
+df_cuetarget <- df_cuetarget %>%
+  pivot_longer(cols = all_of(cond_cols), names_to = "trial_type", values_to = "beta", values_drop_na = FALSE) %>%
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>%  # <- hält die Reihenfolge fest
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>% separate(trial_type,
+                                                                           into = c("time_interval", "likeliness"),
+                                                                           sep = "_",
+                                                                           remove = FALSE) %>%
+  arrange(subject, trial_type)
+
+df_cuetarget$experiment <- "active_trained"
+
+df_cuetarget <- df_cuetarget %>%
+  mutate(subject_unique = paste0(experiment, "_", subject))
+
+
+# naive 
+df_diract <- read.csv("extracted_betas/diract/active_naive_likely>unlikely_BA10_cuetarget.csv") 
+subjects_diract <- c(seq(from="001",to="18")) 
+subjects_diract <- setdiff(subjects_diract, c(3,17)) 
+
+df_diract$subject <- subjects_diract
+
+cond_cols <- setdiff(names(df_diract), "subject")
+
+df_diract <- df_diract %>%
+  pivot_longer(cols = all_of(cond_cols), names_to = "trial_type", values_to = "beta", values_drop_na = FALSE) %>%
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>% 
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>% separate(trial_type,
+                                                                           into = c("time_interval", "likeliness"),
+                                                                           sep = "_",
+                                                                           remove = FALSE) %>%
+  arrange(subject, trial_type)
+
+df_diract$experiment <- "active_naive"
+
+df_diract <- df_diract %>%
+  mutate(subject_unique = paste0(experiment, "_", subject))
+
+
+df <- rbind(df_cuetarget,df_diract)
+
+df_BA10_early <- df
+df_BA10_early$contrast = "early likely > early unlikely"
+df_BA10_early$brain = "left RLPFC"
+
+# ANOVA (early and late)
+fit_BA10 <- aov_ez(
+  id = "subject_unique",
+  dv = "beta",
+  within = c("time_interval", "likeliness"),
+  between = "experiment",
+  data = df, 
+  fun_aggregate = mean
+)
+fit_BA10
+```
+
+# IPL (likely > unlikely)
+```{r}
+# trained
+df_cuetarget <- read.csv("extracted_betas/cuetarget/active_trained_likely>unlikely_IPL.csv") 
+subjects_cuetarget <- c(seq(from="009",to="24"),seq(from="027",to="047"),seq(from="049",to="051"), seq(from="053",to="054")) 
+subjects_cuetarget_task      <- setdiff(subjects_cuetarget, c(10,18,21,36,49,50,51))
+df_cuetarget$subject <- subjects_cuetarget_task
+
+cond_cols <- setdiff(names(df_cuetarget), "subject")
+
+df_cuetarget <- df_cuetarget %>%
+  pivot_longer(cols = all_of(cond_cols), names_to = "trial_type", values_to = "beta", values_drop_na = FALSE) %>%
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>%  # <- hält die Reihenfolge fest
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>% separate(trial_type,
+                                                                           into = c("time_interval", "likeliness"),
+                                                                           sep = "_",
+                                                                           remove = FALSE) %>%
+  arrange(subject, trial_type)
+
+df_cuetarget$experiment <- "active_trained"
+
+df_cuetarget <- df_cuetarget %>%
+  mutate(subject_unique = paste0(experiment, "_", subject))
+
+# naive 
+df_diract <- read.csv("extracted_betas/diract/active_naive_likely>unlikely_IPL_cuetarget.csv") 
+subjects_diract <- c(seq(from="001",to="18")) 
+subjects_diract <- setdiff(subjects_diract, c(3,17)) 
+
+df_diract$subject <- subjects_diract
+
+cond_cols <- setdiff(names(df_diract), "subject")
+
+df_diract <- df_diract %>%
+  pivot_longer(cols = all_of(cond_cols), names_to = "trial_type", values_to = "beta", values_drop_na = FALSE) %>%
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>%  
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>% 
+  separate(trial_type,
+           into = c("time_interval", "likeliness"),
+           sep = "_",
+           remove = FALSE) %>%
+  arrange(subject, trial_type)
+
+df_diract$experiment <- "active_naive"
+
+df_diract <- df_diract %>%
+  mutate(subject_unique = paste0(experiment, "_", subject))
+
+df <- rbind(df_cuetarget,df_diract)
+
+df_leftIPL_main <- df
+df_leftIPL_main$contrast = "likely > unlikely"
+df_leftIPL_main$brain = "left IPL"
+
+# ANOVA (early and late)
+fit_IPL <- aov_ez(
+  id = "subject_unique",
+  dv = "beta",
+  within = c("time_interval", "likeliness"),
+  between = "experiment",
+  data = df, 
+  fun_aggregate = mean
+)
+fit_IPL
+
+# ANOVA early trials 
+fit_earlyIPL_early <- aov_ez(
+  id = "subject_unique",
+  dv = "beta",
+  within = c("likeliness"),
+  between = "experiment",
+  data = df %>%
+    subset(time_interval == "early"), 
+  fun_aggregate = mean
+)
+fit_earlyIPL_early
+
+# t tests 
+emm_early_IPL <- emmeans(fit_earlyIPL_early, ~ likeliness | experiment)
+pairs(emm_early_IPL)
+```
+
+# RSC (likely > unlikely)
+```{r}
+# trained
+df_cuetarget <- read.csv("extracted_betas/cuetarget/active_trained_likely>unlikely_RSC.csv") 
+subjects_cuetarget <- c(seq(from="009",to="24"),seq(from="027",to="047"),seq(from="049",to="051"), seq(from="053",to="054")) 
+subjects_cuetarget_task      <- setdiff(subjects_cuetarget, c(10,18,21,36,49,50,51))
+df_cuetarget$subject <- subjects_cuetarget_task
+
+cond_cols <- setdiff(names(df_cuetarget), "subject")
+
+df_cuetarget <- df_cuetarget %>%
+  pivot_longer(cols = all_of(cond_cols), names_to = "trial_type", values_to = "beta", values_drop_na = FALSE) %>%
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>%  
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>% 
+  separate(trial_type,
+           into = c("time_interval", "likeliness"),
+           sep = "_",
+           remove = FALSE) %>%
+  arrange(subject, trial_type)
+
+df_cuetarget$experiment <- "active_trained"
+
+df_cuetarget <- df_cuetarget %>%
+  mutate(subject_unique = paste0(experiment, "_", subject))
+
+# naive 
+df_diract <- read.csv("extracted_betas/diract/active_naive_likely>unlikely_RSC_cuetarget.csv") 
+subjects_diract <- c(seq(from="001",to="18")) 
+subjects_diract <- setdiff(subjects_diract, c(3,17)) 
+
+df_diract$subject <- subjects_diract
+
+cond_cols <- setdiff(names(df_diract), "subject")
+
+df_diract <- df_diract %>%
+  pivot_longer(cols = all_of(cond_cols), names_to = "trial_type", values_to = "beta", values_drop_na = FALSE) %>%
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>% 
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>% separate(trial_type,
+                                                                           into = c("time_interval", "likeliness"),
+                                                                           sep = "_",
+                                                                           remove = FALSE) %>%
+  arrange(subject, trial_type)
+
+df_diract$experiment <- "active_naive"
+
+df_diract <- df_diract %>%
+  mutate(subject_unique = paste0(experiment, "_", subject))
+
+
+df <- rbind(df_cuetarget,df_diract)
+
+df_RSC_main <- df
+df_RSC_main$contrast = "likely > unlikely"
+df_RSC_main$brain = "RSC"
+
+# ANOVA (early and late)
+fit_RSC <- aov_ez(
+  id = "subject_unique",
+  dv = "beta",
+  within = c("time_interval", "likeliness"),
+  between = "experiment",
+  data = df, 
+  fun_aggregate = mean
+)
+fit_RSC
+
+means_RSC <- emmeans(fit_RSC, ~ likeliness + experiment)
+
+# t tests 
+ctr <- contrast(
+    means_RSC,
+    method = list(
+        active_naive_TE       = c(1, -1,  0, 0 ), 
+        active_trained_TE     = c(0, 0,  1,  -1) 
+    ),
+    adjust = "fdr"
+)
+ctr
+```
+
+# aMPFC (likely > unlikely)
+```{r}
+# trained
+df_cuetarget <- read.csv("extracted_betas/cuetarget/active_trained_likely>unlikely_BA10.csv") 
+subjects_cuetarget <- c(seq(from="009",to="24"),seq(from="027",to="047"),seq(from="049",to="051"), seq(from="053",to="054")) 
+subjects_cuetarget_task      <- setdiff(subjects_cuetarget, c(10,18,21,36,49,50,51)) 
+df_cuetarget$subject <- subjects_cuetarget_task
+
+cond_cols <- setdiff(names(df_cuetarget), "subject")
+
+df_cuetarget <- df_cuetarget %>%
+  pivot_longer(cols = all_of(cond_cols), names_to = "trial_type", values_to = "beta", values_drop_na = FALSE) %>%
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>%  
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>% 
+  separate(trial_type,
+           into = c("time_interval", "likeliness"),
+           sep = "_",
+           remove = FALSE) %>%
+  arrange(subject, trial_type)
+
+df_cuetarget$experiment <- "active_trained"
+
+df_cuetarget <- df_cuetarget %>%
+  mutate(subject_unique = paste0(experiment, "_", subject))
+
+
+# naive
+df_diract <- read.csv("extracted_betas/diract/active_naive_likely>unlikely_BA10_cuetarget.csv") 
+subjects_diract <- c(seq(from="001",to="18")) 
+subjects_diract <- setdiff(subjects_diract, c(3,17)) 
+
+df_diract$subject <- subjects_diract
+
+cond_cols <- setdiff(names(df_diract), "subject")
+
+df_diract <- df_diract %>%
+  pivot_longer(cols = all_of(cond_cols), names_to = "trial_type", values_to = "beta", values_drop_na = FALSE) %>%
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>%  
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>% 
+  separate(trial_type,
+           into = c("time_interval", "likeliness"),
+           sep = "_",
+           remove = FALSE) %>%
+  arrange(subject, trial_type)
+
+df_diract$experiment <- "active_naive"
+
+df_diract <- df_diract %>%
+  mutate(subject_unique = paste0(experiment, "_", subject))
+
+df <- rbind(df_cuetarget,df_diract)
+
+df_BA10_main <- df
+df_BA10_main$contrast = "likely > unlikely"
+df_BA10_main$brain = "right aMPFC"
+
+# ANOVA (early and late)
+fit_BA10 <- aov_ez(
+  id = "subject_unique",
+  dv = "beta",
+  within = c("time_interval", "likeliness"),
+  between = "experiment",
+  data = df, 
+  fun_aggregate = mean
+)
+fit_BA10
+
+means_BA10 <- emmeans(fit_BA10, ~ likeliness + experiment)
+
+# t test
+ctr <- contrast(
+    means_BA10,
+    method = list(
+        active_naive       = c(1, -1,  0, 0 ), 
+        active_trained     = c(0, 0,  1,  -1) 
+    ),
+    adjust = "fdr"
+)
+ctr
+```
+
+# vmPFC (likely > unlikely)
+```{r}
+# trained
+df_cuetarget <- read.csv("extracted_betas/cuetarget/active_trained_likely>unlikely_BA11.csv") 
+subjects_cuetarget <- c(seq(from="009",to="24"),seq(from="027",to="047"),seq(from="049",to="051"), seq(from="053",to="054")) 
+subjects_cuetarget_task      <- setdiff(subjects_cuetarget, c(10,18,21,36,49,50,51))
+df_cuetarget$subject <- subjects_cuetarget_task
+
+cond_cols <- setdiff(names(df_cuetarget), "subject")
+
+df_cuetarget <- df_cuetarget %>%
+  pivot_longer(cols = all_of(cond_cols), names_to = "trial_type", values_to = "beta", values_drop_na = FALSE) %>%
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>% 
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>% 
+  separate(trial_type,
+           into = c("time_interval", "likeliness"),
+           sep = "_",
+           remove = FALSE) %>%
+  arrange(subject, trial_type)
+
+df_cuetarget$experiment <- "active_trained"
+
+df_cuetarget <- df_cuetarget %>%
+  mutate(subject_unique = paste0(experiment, "_", subject))
+
+# naive 
+df_diract <- read.csv("extracted_betas/diract/active_naive_likely>unlikely_BA11_cuetarget.csv") 
+subjects_diract <- c(seq(from="001",to="18")) 
+subjects_diract <- setdiff(subjects_diract, c(3,17)) 
+
+df_diract$subject <- subjects_diract
+
+cond_cols <- setdiff(names(df_diract), "subject")
+
+df_diract <- df_diract %>%
+  pivot_longer(cols = all_of(cond_cols), names_to = "trial_type", values_to = "beta", values_drop_na = FALSE) %>%
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>%  
+  mutate(trial_type = factor(trial_type, levels = cond_cols)) %>% 
+  separate(trial_type,
+           into = c("time_interval", "likeliness"),
+           sep = "_",
+           remove = FALSE) %>%
+  arrange(subject, trial_type)
+
+df_diract$experiment <- "active_naive"
+
+df_diract <- df_diract %>%
+  mutate(subject_unique = paste0(experiment, "_", subject))
+
+df <- rbind(df_cuetarget,df_diract)
+
+df_BA11_main <- df
+df_BA11_main$contrast = "likely > unlikely"
+df_BA11_main$brain = "vmPFC"
+
+# ANOVA (early and late)
+fit_B11 <- aov_ez(
+  id = "subject_unique",
+  dv = "beta",
+  within = c("time_interval", "likeliness"),
+  between = "experiment",
+  data = df, 
+  fun_aggregate = mean
+)
+fit_B11
+
+# ANOVA early trials 
+fit_BA11_early <- aov_ez(
+  id = "subject_unique",
+  dv = "beta",
+  within = c("likeliness"),
+  between = "experiment",
+  data = df %>%
+    subset(time_interval == "early"), 
+  fun_aggregate = mean
+)
+fit_BA11_early
+
+# t tests
+emm_BA11_early <- emmeans(fit_BA11_early, ~ likeliness | experiment)
+pairs(emm_BA11_early)
+```
+
+# figure 7 
+```{r}
+cond_levels <- unique(df$trial_type)
+
+df <- rbind(
+  df_leftIPL_early, df_BA10_early,
+  df_leftIPL_main, df_RSC_main, df_BA10_main, df_BA11_main)
+
+df <- df %>%
+  mutate(
+    facet_label = paste(contrast, brain, sep = "\n"),
+    facet_label = factor(
+      facet_label,
+      levels = c(
+        "likely > unlikely\nRSC",
+        "likely > unlikely\nright aMPFC",
+        "early likely > early unlikely\nleft IPL",
+        "likely > unlikely\nleft IPL",
+        "likely > unlikely\nvmPFC") )) %>% 
+  filter(!is.na(facet_label))
+
+df_avg <- df %>%
+  filter(facet_label %in% c(
+    "likely > unlikely\nRSC",
+    "likely > unlikely\nright aMPFC")) %>%
+  mutate(
+    experiment = factor(experiment, levels = c("active_naive", "active_trained")),
+    likeliness = factor(likeliness, levels = c("likely", "unlikely")),
+    x_label = paste(experiment, likeliness, sep = "_"),
+    fill_label = paste("avg", as.character(likeliness))) %>%
+  group_by(facet_label, brain, contrast, subject_unique, experiment, likeliness, x_label, fill_label) %>%
+  summarise(sub_mean_beta = mean(beta, na.rm = TRUE), .groups = "drop") %>%
+  group_by(facet_label, brain, contrast, experiment, likeliness, x_label, fill_label) %>%
+  summarise(
+    mean_beta = mean(sub_mean_beta, na.rm = TRUE),
+    sd_beta   = sd(sub_mean_beta, na.rm = TRUE),
+    n         = sum(!is.na(sub_mean_beta)),
+    se_beta   = sd_beta / sqrt(n),
+    .groups   = "drop")
+
+df_cond <- df %>%
+  filter(!facet_label %in% c(
+    "likely > unlikely\nRSC",
+    "likely > unlikely\nright aMPFC")) %>%
+  mutate(
+    trial_type = factor(trial_type, levels = cond_levels),
+    experiment = factor(experiment, levels = c("active_naive", "active_trained")),
+    x_label = paste(experiment, trial_type, sep = "_"),
+    fill_label = as.character(trial_type)) %>%
+  group_by(facet_label, brain, contrast, subject_unique, trial_type, experiment, x_label, fill_label) %>%
+  summarise(sub_mean_beta = mean(beta, na.rm = TRUE), .groups = "drop") %>%
+  group_by(facet_label, brain, contrast, trial_type, experiment, x_label, fill_label) %>%
+  summarise(
+    mean_beta = mean(sub_mean_beta, na.rm = TRUE),
+    sd_beta   = sd(sub_mean_beta, na.rm = TRUE),
+    n         = sum(!is.na(sub_mean_beta)),
+    se_beta   = sd_beta / sqrt(n),
+    .groups   = "drop")
+
+plot_df <- bind_rows(df_avg, df_cond) %>%
+  mutate(
+    fill_label = as.character(fill_label),
+    facet_label = factor(
+      facet_label,
+      levels = c(
+        "likely > unlikely\nRSC",
+        "likely > unlikely\nright aMPFC",
+        "early likely > early unlikely\nleft IPL",
+        "likely > unlikely\nleft IPL",
+        "likely > unlikely\nvmPFC" )),
+    x_label = factor(
+      x_label,
+      levels = c(
+        "active_naive_likely",
+        "active_naive_unlikely",
+        "active_trained_likely",
+        "active_trained_unlikely",
+        "active_naive_early_likely",
+        "active_naive_early_unlikely",
+        "active_naive_late_likely",
+        "active_naive_late_unlikely",
+        "active_trained_early_likely",
+        "active_trained_early_unlikely",
+        "active_trained_late_likely",
+        "active_trained_late_unlikely" )))
+
+facet_info <- data.frame(
+  facet_label = levels(plot_df$facet_label),
+  strip_col = c("darkseagreen", "darkseagreen",
+    "darkgoldenrod1",
+    "darkseagreen","darkseagreen" ))
+
+strip_cols <- facet_info$strip_col
+
+vline_df <- tibble(
+  facet_label = factor(
+    levels(plot_df$facet_label),
+    levels = levels(plot_df$facet_label)
+  ),
+  xintercept = ifelse(
+    facet_label %in% c(
+      "likely > unlikely\nRSC",
+      "likely > unlikely\nright aMPFC"),2.5,4.5))
+
+text_df <- tibble(
+  facet_label = factor(
+    rep(levels(plot_df$facet_label), each = 2),
+    levels = levels(plot_df$facet_label)),
+  x = ifelse(
+    facet_label %in% c(
+      "likely > unlikely\nRSC",
+      "likely > unlikely\nright aMPFC"),
+    rep(c(1.5, 3.5), length(levels(plot_df$facet_label))),
+    rep(c(2.5, 6.5), length(levels(plot_df$facet_label)))),
+  y = 52,
+  label = rep(c("naïve", "trained"), length(levels(plot_df$facet_label))))
+
+p <- plot_df %>%
+  ggplot(aes(x = x_label, y = mean_beta, fill = fill_label)) +
+  geom_col(width = 0.7) +
+  geom_errorbar(
+    aes(ymin = mean_beta - se_beta, ymax = mean_beta + se_beta),
+    width = 0.15,linewidth = 0.8) +
+  geom_vline(
+    data = vline_df,
+    aes(xintercept = xintercept),
+    linewidth = 0.4,
+    color = "grey40") +
+  geom_hline(yintercept = 0, linewidth = 0.2, color = "grey40") +
+  geom_text(
+    data = text_df,
+    aes(x = x, y = y, label = label),
+    inherit.aes = FALSE,
+    vjust = 1.2,
+    size = 3.5) +
+  scale_x_discrete(labels = c(
+    "active_naive_likely" = "likely",
+    "active_naive_unlikely" = "unlikely",
+    "active_trained_likely" = "likely",
+    "active_trained_unlikely" = "unlikely",
+    "active_naive_early_likely" = "early likely",
+    "active_naive_early_unlikely" = "early unlikely",
+    "active_naive_late_likely" = "late likely",
+    "active_naive_late_unlikely" = "late unlikely",
+    "active_trained_early_likely" = "early likely",
+    "active_trained_early_unlikely" = "early unlikely",
+    "active_trained_late_likely" = "late likely",
+    "active_trained_late_unlikely" = "late unlikely")) +
+  scale_y_continuous(breaks = seq(-20, 55, by = 20),
+                     position = "right") +
+  coord_cartesian(ylim = c(-22, 51)) +
+  scale_fill_manual(
+    values = c("avg likely" = "#8000FF","avg unlikely" = "#00FF80","early_likely" = "#54278f",
+      "early_unlikely" = "#238b45","late_likely" = "#756bb1","late_unlikely" = "#74c476",
+      "early likely" = "#54278f","early unlikely" = "#238b45", "late likely" = "#756bb1","late unlikely" = "#74c476"),
+    breaks = c("avg likely","avg unlikely","early_likely","early_unlikely", "late_likely", "late_unlikely"),
+    labels = c("likely","unlikely","early likely","early unlikely","late likely","late unlikely")) +
+  facet_wrap2(~ facet_label,ncol = 2,
+              scales = "free_x",as.table = TRUE,strip = strip_themed(
+                text_x = elem_list_text(colour = "black", face = "bold"),
+                background_x = lapply(strip_cols, function(x) element_rect(fill = x)))) +
+  labs(x = "", y = "Mean beta (±SE)", fill = "trial type") +
+  theme_minimal() +
+  theme(legend.position = c(0.78, 0.16),legend.title = element_blank(),
+    legend.background = element_blank())
+
+p1 <- p +
+  theme(legend.position = "right")
+p1
+
+ggsave(
+  "figure.svg",
+  plot = p1,
+  width = 33,
+  height = 25,
+  units = "cm"
+)
+```
+
+
+
+
