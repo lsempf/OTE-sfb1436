@@ -1,1 +1,8 @@
-behavioral data can be found at OSF ( https://osf.io/am6y7/ )
+## Behavioral Data Analysis
+
+Behavioral data (`.tsv` files) are publicly available via OSF:
+https://osf.io/am6y7/
+
+The R Markdown script `run_analysis.Rmd` reproduces all behavioral analyses presented in the manuscript. It requires the behavioral `.tsv` files as input and generates all statistical analyses and figures related to the behavioral data.
+
+Before running the script, download the behavioral data from the OSF repository and place the files in the appropriate input directory.
