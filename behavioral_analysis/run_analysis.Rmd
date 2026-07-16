@@ -1,0 +1,641 @@
+---
+title: "behavioral analysis"
+author: "Linda Sempf"
+output:
+  html_document:
+    theme: sandstone
+    highlight: rstudio
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+    toc_depth: 3
+  pdf_document:
+    toc: yes
+---
+
+
+```{r setup, message=FALSE, warning=FALSE, comment=FALSE, echo=FALSE}
+# rm(list = ls())
+library(tidyverse); library(afex); library(emmeans); library('plot.matrix'); library(dplyr); library(readr); library(viridis); library(lme4); library(cluster); library(patchwork); library(philentropy); library(ggbeeswarm);
+library(tibble); library(knitr); library(kableExtra); library(ggbreak);
+```
+
+which subjects 
+```{r}
+subjects_cuetarget <- c(seq(from="009",to="24"),seq(from="027",to="047"),seq(from="049",to="051"), seq(from="053",to="054")) 
+subjects_cuetarget_task      <- setdiff(subjects_cuetarget, c(10,18,21,36,49,50,51)) 
+
+subjects_detek <- c(seq(from="001",to="036")) 
+subjects_detek <- setdiff(subjects_detek,c(32)) 
+
+subjects_diract <- c(seq(from="001",to="018")) 
+subjects_diract <- setdiff(subjects_diract, c(3,17)) 
+```
+
+# load data 
+trained subjects
+```{r, warning = FALSE, message = FALSE, echo=FALSE, results = FALSE}
+# load data 
+pathToTSVs = "data_trained"
+
+loadSubject <- function(subject,df = data.frame()){
+  for (session in 4){
+    for (iRun in seq(1,4)){
+      filename = sprintf('%s/sub-%03i/sub-%03i_ses-%03i_task-active_run-%i_events.tsv',
+                         pathToTSVs, subject, subject, session, iRun)
+      if (file.exists(filename)) {
+        df_tmp <- read_tsv(filename,
+                           col_types = cols(
+                             onset = col_double(),
+                             duration = col_double(),
+                             trial_type = col_factor(),
+                             response_time = col_character() # import response time as character 
+                             # response_time = col_double()  # original code 
+                           )
+        ) %>%
+          # append info which was part of filename
+          mutate(subject = subject,
+                 session = session,
+                 run     = iRun
+          )
+        
+        df <- rbind(df,df_tmp)     
+      } else {
+        print(paste("file", filename, "not found. moving on.."))
+      }
+    }
+  }
+  return(df)
+}
+l <- lapply(subjects_cuetarget_task, loadSubject)
+df_cuetarget <- do.call("rbind", l) # dataframe with all subjects, all active sessions, all runs 
+
+df_cuetarget$response_time <- as.numeric(df_cuetarget$response_time) # response_time = character; NAs introduced by coercion 
+df_cuetarget[is.na(df_cuetarget)] <- NaN 
+
+df_cuetarget <- df_cuetarget %>%
+  mutate(delay = fct_collapse(factor(trial_type), 
+                              short = c("shortExpected", "shortUnexpected"),
+                              long = c("longExpected","longUnexpected")),
+         expectation = fct_collapse(factor(trial_type),
+                                    expected = c("shortExpected","longExpected"),
+                                    unexpected = c("shortUnexpected","longUnexpected")
+         )
+  ) %>%
+  mutate(subject = factor(subject))
+
+# recalibration (beamer hat puffer: stimulus kam eigentlich später als bei PTB angezeigt)
+lag_projector <- 0.135 # in seconds, like RTs 
+df_cuetarget <- df_cuetarget %>%
+  mutate(response_time = ifelse(session == 4, response_time-lag_projector, response_time))
+
+# add 1:100 for each run
+numel = nrow(df_cuetarget)/100 
+iTrial = rep(c(1:100), times=numel)
+df_cuetarget$iTrial = iTrial
+
+# add 1:50 for each block
+numel = (nrow(df_cuetarget)/100)*2 
+iTrialBlock = rep(c(1:50), times=numel)
+df_cuetarget$iTrialBlock = iTrialBlock
+
+df_cuetarget$experiment = "cuetarget"
+
+too_quick = 0.150 
+
+upper_bound <- quantile(df_cuetarget$response_time, 0.99, na.rm = TRUE)
+too_slow = upper_bound
+
+df_cuetarget$subject_unique <- paste(df_cuetarget$experiment, df_cuetarget$subject, sep = "_")
+
+df_cuetarget$training_status <- "trained"
+df_cuetarget$lab <- "MRI"
+```
+
+load naive behavioral lab 
+```{r, warning = FALSE, message = FALSE, echo=FALSE, results = FALSE}
+pathToTSVs = "data_naive_behavioral-lab"
+
+# create a function (for subjects with all measuremnets)
+loadSubject <- function(subject,df = data.frame()){
+  for (session in seq(1)){  # with detection task
+    for (task in c("active")) {
+      for (iRun in seq(1,4)){
+        filename = sprintf('%s/sub-%03i/sub-%03i_ses-%03i_task-%s_run-%i_events.tsv',
+                           pathToTSVs, subject, subject, session,task, iRun)
+        if (file.exists(filename)) {
+          df_tmp <- read_tsv(filename,
+                            col_types = cols(
+                              onset = col_double(),
+                              duration = col_double(),
+                              trial_type = col_factor(),
+                              response_time = col_character() # import response time as character 
+                            )
+          ) %>%
+            # append info which was part of filename
+            mutate(subject = subject,
+                  session = session,
+                  run     = iRun
+            )
+        
+          df <- rbind(df,df_tmp)     
+        } else {
+          print(paste("file", filename, "not found. moving on.."))
+        }
+      }
+    }
+  }
+    return(df)
+}
+
+# and create data frame 
+l <- lapply(subjects_detek, loadSubject)
+df_detek <- do.call("rbind", l) # dataframe with all subjects, all active sessions, all runs 
+
+df_detek$response_time <- as.numeric(df_detek$response_time) # response_time = character; NAs introduced by coercion 
+df_detek[is.na(df_detek)] <- NaN 
+
+# add columns 
+df_detek <- df_detek %>%
+  mutate(delay = fct_collapse(factor(trial_type), 
+                              short = c("shortExpected", "shortUnexpected"),
+                              long = c("longExpected","longUnexpected")),
+         expectation = fct_collapse(factor(trial_type),
+                                    expected = c("shortExpected","longExpected"),
+                                    unexpected = c("shortUnexpected","longUnexpected")
+         )
+  ) %>%
+  mutate(subject = factor(subject))
+
+# add 1:104 for each run
+numel = nrow(df_detek)/100
+iTrial = rep(c(1:100), times=numel)
+df_detek$iTrial = iTrial
+
+# add 1:52 for each block
+numel = (nrow(df_detek)/100)*2 
+iTrialBlock = rep(c(1:50), times=numel) 
+df_detek$iTrialBlock = iTrialBlock
+
+df_detek$experiment = "detek"
+
+df_detek$subject_unique <- paste(df_detek$experiment, df_detek$subject, sep = "_")
+
+df_detek$training_status <- "naive"
+
+df_detek$lab <- "beh"
+```
+
+load naive MRI
+```{r, warning = FALSE, message = FALSE, echo=FALSE, results = FALSE}
+pathToTSVs = "data_naive_MRI-lab"
+
+# create a function (for subjects with all measuremnets)
+loadSubject <- function(subject,df = data.frame()){
+  for (session in seq(1)){  # with detection task
+    for (task in c("active")) {
+      for (iRun in seq(1,4)){
+        filename = sprintf('%s/sub-%03i/sub-%03i_ses-%03i_task-%s_run-%i_events.tsv',
+                           pathToTSVs, subject, subject, session,task, iRun)
+        if (file.exists(filename)) {
+          df_tmp <- read_tsv(filename,
+                            col_types = cols(
+                              onset = col_double(),
+                              duration = col_double(),
+                              trial_type = col_factor(),
+                              response_time = col_character() # import response time as character 
+                            )
+          ) %>%
+            # append info which was part of filename
+            mutate(subject = subject,
+                  session = session,
+                  run     = iRun
+            )
+        
+          df <- rbind(df,df_tmp)     
+        } else {
+          print(paste("file", filename, "not found. moving on.."))
+        }
+      }
+    }
+  }
+    return(df)
+}
+
+# and create data frame 
+l <- lapply(subjects_diract, loadSubject)
+df_diract <- do.call("rbind", l) # dataframe with all subjects, all active sessions, all runs 
+
+df_diract$response_time <- as.numeric(df_diract$response_time) # response_time = character; NAs introduced by coercion 
+df_diract[is.na(df_diract)] <- NaN 
+
+# add columns 
+df_diract <- df_diract %>%
+  mutate(delay = fct_collapse(factor(trial_type), 
+                              short = c("shortExpected", "shortUnexpected"),
+                              long = c("longExpected","longUnexpected")),
+         expectation = fct_collapse(factor(trial_type),
+                                    expected = c("shortExpected","longExpected"),
+                                    unexpected = c("shortUnexpected","longUnexpected")
+         )
+  ) %>%
+  mutate(subject = factor(subject))
+
+# recalibration (beamer hat puffer: stimulus kam eigentlich später als bei PTB angezeigt)
+lag_projector <- 0.135 # in seconds, like RTs 
+df_diract <- df_diract %>%
+  mutate(response_time = ifelse(session == 1, response_time-lag_projector, response_time))
+
+# add 1:104 for each run
+numel = nrow(df_diract)/100
+iTrial = rep(c(1:100), times=numel)
+df_diract$iTrial = iTrial
+
+# add 1:52 for each block
+numel = (nrow(df_diract)/100)*2 
+iTrialBlock = rep(c(1:50), times=numel) 
+df_diract$iTrialBlock = iTrialBlock
+
+df_diract$experiment = "diract"
+
+df_diract$subject_unique <- paste(df_diract$experiment, df_diract$subject, sep = "_")
+
+# df_diract$response_time <- df_diract$response_time - 0.125
+
+df_diract$training_status <- "naive"
+
+df_diract$lab <- "MRI"
+```
+
+combine data frames
+```{r}
+df <- rbind(df_cuetarget, df_detek, df_diract)
+rm(df_cuetarget,df_detek,df_diract,l)
+
+df$subject_unique <- as.factor(df$subject_unique)
+```
+
+
+# TE effect in trained participants 
+t test: responses early likely VS. early unlikely
+```{r}
+fit_TE_cuetarget <- aov_ez(
+  id = "subject_unique",
+  dv = "response_time",
+  within = c("expectation"),
+  data = df %>% subset(experiment == "cuetarget") %>% 
+    subset(response_time < 1) %>% # drop too slow errors
+    subset(delay=="short"), 
+  fun_aggregate = mean
+)
+fit_TE_cuetarget
+
+means_early <- emmeans(fit_TE_cuetarget, ~ expectation)
+pairs(means_early)
+```
+
+
+# table 1: response times  
+session-wise
+```{r}
+df %>%
+  subset(response_time<1) %>%
+  filter(delay == "short") %>%
+  group_by(experiment, subject_unique, session, delay, expectation) %>%
+  summarize(mean_RT = mean(response_time, na.rm = TRUE), .groups = "drop") %>%
+  group_by(experiment, session, delay, expectation) %>%
+  summarize(
+    mean_RT_group = mean(mean_RT, na.rm = TRUE),
+    se = sd(mean_RT, na.rm = TRUE) / sqrt(n()),  
+    n = n(),                                    
+    .groups = "drop" ) %>%
+  mutate(mean_RT_group = mean_RT_group * 1000,
+         se = se * 1000)
+```
+
+run-wise
+```{r}
+table_RT <- df %>%
+  subset(response_time<1) %>%
+  filter(delay == "short") %>%
+  group_by(experiment, subject_unique, session, run, delay, expectation) %>%
+  summarize(mean_RT = mean(response_time, na.rm = TRUE), .groups = "drop") %>%
+  group_by(experiment, session, run, delay, expectation) %>%
+  summarize(
+    mean_RT_group = mean(mean_RT, na.rm = TRUE),
+    se = sd(mean_RT, na.rm = TRUE) / sqrt(n()),  
+    n = n(),                                    
+    .groups = "drop" ) %>%
+  mutate(mean_RT_group = mean_RT_group * 1000,
+         se = se * 1000) %>%
+  mutate(
+    mean_RT_group = round(mean_RT_group, 2),
+    se = round(se, 2)) %>%
+  select(experiment, session, run, expectation, mean_RT_group, se) %>%
+  mutate(
+    expectation = dplyr::recode(
+      expectation,
+      "likely"   = "early likely",
+      "unlikely" = "early unlikely"
+    ),
+    experiment = dplyr::recode(
+      experiment,
+      "cuetarget" = "fMRI experiment",
+      "detek"     = "behavioral experiment",
+      "diract"    = "fMRI experiment: ohne training"
+    ),
+    session = dplyr::recode(
+      session,
+      "1" = "1 active naive",
+      "2" = "2 active training",
+      "3" = "3 active training",
+      "4" = "4 active trained"
+    )
+  ) %>%
+  mutate(mean_RT_group = round(mean_RT_group, 2),
+         se = round(se, 2)) %>%
+  pivot_wider(names_from  = expectation,
+    values_from = c(mean_RT_group, se),
+    names_glue  = "{expectation}_{.value}") %>%
+  relocate(
+    experiment, session, run,
+    `expected_mean_RT_group`, `expected_se`,
+    `unexpected_mean_RT_group`, `unexpected_se`) %>%
+  rename(
+    "early likely M"    = "expected_mean_RT_group",
+    "early likely SE"   = "expected_se",
+    "early unlikely M"  = "unexpected_mean_RT_group",
+    "early unlikely SE" =  "unexpected_se"
+  ) %>%
+  mutate(dplyr::across(
+      c(`early likely M`, `early likely SE`,
+        `early unlikely M`, `early unlikely SE`),
+      ~ sprintf("%.2f", .x)))
+table_RT
+```
+
+
+# ANOVA in trained participants 
+trained participants, early trials 
+```{r}
+fit_TE_cuetarget_early <- aov_ez(
+  id = "subject_unique",
+  dv = "response_time",
+  within = c("run", "expectation"),
+  data = df %>% subset(experiment == "cuetarget") %>% 
+    subset(response_time < 1) %>% # drop too slow errors
+    subset(delay=="short"), 
+  fun_aggregate = mean
+)
+fit_TE_cuetarget_early
+```
+
+trained participants, late trials 
+```{r}
+fit_TE_cuetarget_late <- aov_ez(
+  id = "subject_unique",
+  dv = "response_time",
+  within = c("run", "expectation"),
+  data = df %>% subset(experiment == "cuetarget") %>% 
+    subset(response_time < 1) %>% # drop too slow errors
+    subset(delay=="long"), 
+  fun_aggregate = mean
+)
+fit_TE_cuetarget_late
+```
+
+
+# figure 2: response times 
+```{r}
+text_size <- 10
+text_face <- "plain"
+
+df_rt <- df %>%
+  subset(response_time < 1) %>% # drop too slow errors
+  subset(experiment=="cuetarget") %>%
+  subset(session==4) %>%
+  group_by(experiment, subject_unique, session, delay, expectation) %>%
+  summarize(mean_RT = mean(response_time, na.rm = TRUE), .groups = "drop") %>%
+  filter(!(is.na(mean_RT))) %>%
+  mutate(
+    session_num = as.integer(as.character(session)),
+    timeline    = if_else(experiment == "detek", session_num - 1L, session_num)
+  ) %>%
+  filter(timeline >= 0)
+
+sum_rt <- df_rt %>%
+  group_by(timeline, experiment, delay, expectation) %>%
+  summarize(
+    mean_group = mean(mean_RT, na.rm = TRUE),
+    se_group   = sd(mean_RT, na.rm = TRUE) / sqrt(dplyr::n()),
+    .groups    = "drop"
+  ) %>%
+  mutate(
+    exp_group = paste(delay, expectation),
+    exp_group = factor(
+      exp_group,
+      levels = c("short expected","short unexpected",
+                 "long expected","long unexpected")
+    ))
+
+label_map <- c(
+  `0` = "active naive (session 1)",
+  `2` = "active training (session 2)",
+  `3` = "active training (session 3)",
+  `4` = "active trained (session 4)")
+
+sum_rt <- sum_rt %>%
+  mutate(timeline = factor(timeline, levels = c(0, 2, 3,4), ordered = TRUE))
+
+
+pd <- position_dodge(width = 0.6)
+
+
+# RT distribution plots (session 4, both delays)
+p2 <- df %>%
+  subset(experiment=="cuetarget") %>%
+  subset(session==4) %>%
+  subset(response_time < 1) %>% # drop too slow errors
+  group_by(experiment, subject_unique, session, delay, expectation) %>% # aggregate data per subject
+  summarize(mean_RT = mean(response_time, na.rm =T),
+            median_RT = median(response_time, na.rm =T)) %>%
+  mutate(
+    condition = paste(delay, expectation), condition = recode(
+      condition, "short expected"   = "early likely", "short unexpected" = "early unlikely",
+      "long expected"    = "late likely", "long unexpected"  = "late unlikely"),
+    condition = factor(condition, levels = c("early likely","early unlikely","late likely","late unlikely"))) %>%
+  subset(!is.na(mean_RT)) %>%
+  ggplot(aes(x = mean_RT, color = condition, xName='weight')) +
+  geom_density(size=2) +
+  #geom_density(aes(y=..scaled..), size=2) +
+  scale_color_manual(values = c("late likely"="#756bb1","late unlikely"="#74c476",
+                                "early likely"="#54278f","early unlikely"="#238b45")) +
+  ggtitle(paste0("")) +
+  xlab("mean response time") +
+  ylab("Probability Density in au") +
+  xlim(c(-0.20,0.4)) +
+  theme_minimal() +
+  theme(legend.title = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_text(size = 8))
+
+p1_base <- ggplot(sum_rt, aes(x = experiment, y = mean_group, fill = exp_group)) +
+  facet_wrap(
+    ~ timeline, nrow = 1, scales = "free_x",
+    labeller = labeller(timeline = function(x) label_map[as.character(x)])
+  ) +
+  geom_col(position = pd, width = 0.5) +
+  geom_errorbar(
+    aes(ymin = mean_group - se_group, ymax = mean_group + se_group),
+    position = pd, width = 0.15, linewidth = 1.0
+  ) +
+  scale_fill_manual(values = c(
+    "long expected"="#756bb1","long unexpected"="#74c476",
+    "short expected"="#54278f","short unexpected"="#238b45"
+  ), drop = FALSE) +
+  labs(x = NULL, y = "mean RT (s)", title = "") +
+  theme_minimal(base_size = text_size) +
+  theme(
+    text = element_text(face = text_face),
+    panel.grid.minor = element_blank(),
+    legend.position = "none",
+    strip.text = element_text(face = text_face),
+    axis.title.y = element_text(size = 8)
+  )
+
+p1_top <- p1_base +
+  coord_cartesian(ylim = c(0.145, 0.29)) +
+  scale_y_continuous(
+    breaks = c(0.135, 0.160, 0.185, 0.210, 0.235, 0.260)
+  ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.title.x = element_blank(),
+    plot.margin = margin(5.5, 5.5, 0, 5.5)
+  )
+
+p1_bottom <- p1_base +
+  coord_cartesian(ylim = c(0, 0.0008)) +
+  scale_y_continuous(
+    breaks = 0,
+    labels = "0"
+  ) +
+  labs(title = NULL, y = NULL) +
+  theme(
+    strip.text = element_blank(),
+    plot.margin = margin(0, 5.5, 5.5, 5.5)
+  )
+
+p1_broken <- p1_top / p1_bottom +
+  plot_layout(heights = c(80, 1))
+
+(p1_broken | p2) +
+  plot_layout(widths = c(1, 2))
+```
+
+
+# ANOVA in naive participants 
+naive participants, early trials 
+```{r}
+fit_TE_naive_early <- aov_ez(
+  id = "subject_unique",
+  dv = "response_time",
+  within = c("run", "expectation"),
+  data = df %>% subset(training_status == "naive") %>% 
+    subset(response_time < 1) %>% # drop too slow errors
+    subset(delay=="short"), 
+  fun_aggregate = mean
+)
+fit_TE_naive_early
+```
+
+naive participants, late trials
+```{r}
+fit_TE_naive_late <- aov_ez(
+  id = "subject_unique",
+  dv = "response_time",
+  within = c("run", "expectation"),
+  data = df %>% subset(training_status == "naive") %>% 
+    subset(response_time < 1) %>% # drop too slow errors
+    subset(delay=="long"), 
+  fun_aggregate = mean
+)
+fit_TE_naive_late
+```
+
+
+# trained VS. naive participants 
+linear mixed-effects model, early trials 
+```{r}
+fit <- mixed(
+  response_time ~ expectation * training_status + lab +
+    (1 | subject_unique),
+  data = df %>%
+    filter(
+      delay == "short",
+      response_time < 1,
+      experiment %in% c("diract", "detek") |
+      (experiment == "cuetarget" & session == 4)) %>%
+    mutate(
+      expectation = factor(expectation),
+      training_status = factor(training_status),
+      lab = factor(lab),
+      subject_unique = factor(subject_unique)
+    ),
+  method = "S"
+)
+fit
+
+emm <- emmeans(fit, ~ expectation * training_status)
+
+contrast_expectation <- contrast(
+  emm,
+  interaction = "pairwise",
+  by = NULL
+)
+contrast_expectation
+
+# numeric TE effects 
+df %>% 
+  subset(delay == "short") %>%
+  subset(experiment == "diract" | experiment == "detek" |
+           (experiment == "cuetarget" & session == 4)) %>%
+  subset(response_time < 1) %>%
+  group_by(lab, training_status, experiment, subject_unique, session, run, delay, expectation) %>%
+  summarize(mean_RT = mean(response_time, na.rm = TRUE)) %>%
+  group_by(lab, training_status, experiment, subject_unique, session, delay, expectation) %>%
+  summarize(mean_RT = mean(mean_RT)) %>%
+  pivot_wider(names_from = expectation, values_from = mean_RT) %>%
+  mutate(TE = unexpected - expected) %>%
+  group_by(training_status) %>%
+  summarize(meanTE = mean(TE)) %>%
+  pivot_wider(
+    names_from = training_status,
+    values_from = meanTE) %>%
+  mutate(difference_meanTE = naive - trained)
+```
+
+linear mixed-effects model, late trials 
+```{r}
+fit <- mixed(
+  response_time ~ expectation * training_status + lab +
+    (1 | subject_unique),
+  data = df %>%
+    filter(
+      delay == "long",
+      response_time < 1,
+      experiment %in% c("diract", "detek") |
+      (experiment == "cuetarget" & session == 4)) %>%
+    mutate(
+      expectation = factor(expectation),
+      training_status = factor(training_status),
+      lab = factor(lab),
+      subject_unique = factor(subject_unique)
+    ),
+  method = "S"
+)
+fit
+```
