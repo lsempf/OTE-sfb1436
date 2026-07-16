@@ -1,5 +1,0 @@
-For each experiment (naïve and trained participants), a separate second-level analysis was conducted in MATLAB (SPM12) using a flexible factorial design including all four experimental conditions. 
-For the trained participants, condition-specific beta estimates were extracted from the identified regions of interest (ROIs). 
-The same ROIs were then used to extract contrast estimates from the corresponding contrast images of the naïve participants. 
-An R script was used to compare the extracted values between the trained and naïve groups.
-
