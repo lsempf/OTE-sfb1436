@@ -1,3 +1,5 @@
-(1) 
-(2)
-(3) 
+fmriprep V. 21.1 was used for this dataset. 
+
+(1) in case slurm runs on your system, you can start the preprocessing pipeline by creating slurm jobs via `fmriprep_arrayjob.slurm`. This will call `run_fmriprep.sh`  
+(2) in case slurm does not run on your system, start preprocessing by subject-wise starting the script `run_fmriprep.sh`  
+(3) after fmriprep completed, use `run_fmriprep_aftercare.sh` for additional smoothing etc.
